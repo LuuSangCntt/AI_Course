@@ -1,0 +1,3 @@
+
+*.txt, *.doc, *.docx
+__pycache__/, *.pyc, *.pyo, *.egg-info/, venv/
