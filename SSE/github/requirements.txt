@@ -1,0 +1,4 @@
+fastmcp
+GitPython
+PyGithub
+python-dotenv
