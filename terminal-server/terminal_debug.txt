@@ -1,0 +1,18 @@
+2026-02-10 10:38:22,120 - INFO - === SERVER TERMINAL KHỞI ĐỘNG (STDIO MODE) ===
+2026-02-10 10:38:29,512 - INFO - --- BẮT ĐẦU LỆNH: git status ---
+2026-02-10 10:38:29,512 - DEBUG - Thư mục làm việc: C:\WORKDATA_SANG\AI_Course\MCP_Local\
+2026-02-10 10:38:29,512 - DEBUG - Đang khởi tạo subprocess...
+2026-02-10 10:38:29,531 - DEBUG - Tiến trình con đã chạy với PID: 1100
+2026-02-10 10:38:29,683 - INFO - Lệnh hoàn tất sau 0.17 giây.
+2026-02-10 10:38:29,683 - DEBUG - Độ dài Stdout: 475
+2026-02-10 10:38:29,683 - DEBUG - Độ dài Stderr: 0
+2026-02-10 10:38:29,683 - INFO - --- KẾT THÚC LỆNH ---
+
+2026-02-10 10:39:05,440 - INFO - === SERVER TERMINAL KHỞI ĐỘNG (STDIO MODE) ===
+2026-02-10 10:39:09,510 - INFO - Đang liệt kê thư mục: C:\WORKDATA_SANG\AI_Course\MCP_Local\
+2026-02-10 10:39:09,510 - DEBUG - Tìm thấy 9 items.
+2026-02-10 10:41:28,662 - INFO - === SERVER TERMINAL KHỞI ĐỘNG (STDIO MODE) ===
+2026-02-10 10:42:04,350 - INFO - === SERVER TERMINAL KHỞI ĐỘNG (STDIO MODE) ===
+2026-02-10 10:42:10,118 - INFO - --- BẮT ĐẦU LỆNH: git status ---
+2026-02-10 10:42:10,286 - INFO - Lệnh hoàn tất. Độ dài output: 475
+2026-02-10 10:42:10,286 - INFO - --- KẾT THÚC LỆNH VÀ TRẢ VỀ ---
