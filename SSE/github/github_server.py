@@ -1,190 +1,208 @@
 import os
 import logging
 import subprocess
-import shutil
+import json
 from mcp.server.fastmcp import FastMCP
 from git import Repo, InvalidGitRepositoryError
 from github import Github
-import json
 
-# Ép GitPython không kiểm tra quá khắt khe lúc khởi động
+# --- CẤU HÌNH HỆ THỐNG ---
+# Ép GitPython không kiểm tra quá khắt khe lúc khởi động để tránh lỗi trong Docker
 os.environ["GIT_PYTHON_REFRESH"] = "quiet"
 
-# 1. Khởi tạo MCP Server trên cổng 8002
+# Khởi tạo MCP Server trên cổng 8002
 mcp = FastMCP("Git & GitHub Expert Manager", host="0.0.0.0", port=8002)
 
-# Logging chuyên nghiệp
+# Thiết lập Logging chi tiết
+LOG_FILE = 'github_log.txt'
 current_dir = os.path.dirname(os.path.abspath(__file__))
 LOG_FILE = os.path.join(current_dir, "git_expert.txt")
 logging.basicConfig(
-    filename=LOG_FILE, 
-    level=logging.DEBUG, 
-    format="%(asctime)s - %(levelname)s - %(message)s", 
+    filename=LOG_FILE,
+    level=logging.DEBUG, # Ghi nhận từ mức Debug trở lên
+    format="%(asctime)s - %(levelname)s - [%(funcName)s] - %(message)s",
     force=True,
     encoding="utf-8"
 )
 
-# Khởi tạo GitHub API Client (Xác thực Cloud)
+# Khởi tạo GitHub Cloud Client
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 gh_client = Github(GITHUB_TOKEN) if GITHUB_TOKEN else None
 
-# --- NHÓM 1: HỆ THỐNG TỆP & CẤU HÌNH AN TOÀN ---
+if not GITHUB_TOKEN:
+    logging.warning("GITHUB_TOKEN không tồn tại. Các tính năng Cloud sẽ bị hạn chế.")
+
+# --- NHÓM 1: QUẢN TRỊ HỆ THỐNG TỆP & AN TOÀN ---
 
 @mcp.tool()
 def create_local_folder(path: str) -> str:
-    """Tạo một thư mục mới tại đường dẫn chỉ định (trong container/mount volume)."""
+    """Tạo thư mục mới và cấu hình safe.directory cho Git."""
+    logging.info(f"Yêu cầu tạo thư mục: {path}")
     try:
         os.makedirs(path, exist_ok=True)
-        # Tự động add vào safe.directory để tránh lỗi permission của Git
+        # Sửa lỗi bảo mật khi mount volume từ Host vào Docker
         subprocess.run(["git", "config", "--global", "--add", "safe.directory", path])
-        return f"Đã tạo thư mục thành công: {path}"
+        logging.debug(f"Đã tạo và thiết lập safe.directory cho: {path}")
+        return f"Thành công: Đã tạo thư mục {path}"
     except Exception as e:
-        return f"Lỗi tạo thư mục: {str(e)}"
+        logging.error(f"Lỗi tạo thư mục {path}: {str(e)}")
+        return f"Lỗi: {str(e)}"
 
 @mcp.tool()
 def git_init_safe(repo_path: str) -> str:
-    """Khởi tạo hoặc đánh dấu một thư mục là an toàn để Git có thể truy cập."""
+    """Khởi tạo Git repo và cấu hình an toàn."""
+    logging.info(f"Khởi tạo Git tại: {repo_path}")
     try:
         subprocess.run(["git", "config", "--global", "--add", "safe.directory", repo_path])
         repo = Repo.init(repo_path)
-        return f"Đã thiết lập an toàn và khởi tạo repo tại: {repo_path}"
+        logging.debug(f"Git Init hoàn tất tại {repo_path}")
+        return f"Đã khởi tạo repo tại: {repo_path}"
     except Exception as e:
+        logging.error(f"Lỗi Init tại {repo_path}: {str(e)}")
         return f"Lỗi: {str(e)}"
 
-# --- NHÓM 2: THAO TÁC LOCAL (GitPython) ---
+# --- NHÓM 2: THAO TÁC LOCAL (GIT CORE) ---
 
 @mcp.tool()
 def git_full_status(repo_path: str) -> str:
-    """Kiểm tra trạng thái chi tiết, các file thay đổi, file chưa track."""
+    """Kiểm tra trạng thái chi tiết của repository."""
+    logging.info(f"Kiểm tra status: {repo_path}")
     try:
         repo = Repo(repo_path)
-        return repo.git.status()
-    except Exception as e: return f"Lỗi: {str(e)}"
+        status = repo.git.status()
+        logging.debug(f"Kết quả status cho {repo_path} đã được trích xuất.")
+        return status
+    except Exception as e:
+        logging.error(f"Lỗi lấy status: {str(e)}")
+        return f"Lỗi: {str(e)}"
+
+@mcp.tool()
+def git_add(repo_path: str, file_paths: list[str]) -> str:
+    """Đưa file vào khu vực chờ commit (Staging Area)."""
+    logging.info(f"Git Add: {file_paths} tại {repo_path}")
+    try:
+        repo = Repo(repo_path)
+        repo.index.add(file_paths)
+        logging.debug(f"Đã Stage {len(file_paths)} tệp tin.")
+        return f"Đã add: {', '.join(file_paths)}"
+    except Exception as e:
+        logging.error(f"Lỗi Git Add: {str(e)}")
+        return f"Lỗi: {str(e)}"
+
+@mcp.tool()
+def git_commit(repo_path: str, message: str) -> str:
+    """Tạo commit mới với nội dung mô tả."""
+    logging.info(f"Git Commit: '{message}' tại {repo_path}")
+    try:
+        repo = Repo(repo_path)
+        new_commit = repo.index.commit(message)
+        logging.info(f"Commit thành công: {new_commit.hexsha}")
+        return f"Đã commit: {new_commit.hexsha}"
+    except Exception as e:
+        logging.error(f"Lỗi Commit: {str(e)}")
+        return f"Lỗi: {str(e)}"
+
+# --- NHÓM 3: ĐỒNG BỘ & CLOUD (SYNC) ---
 
 @mcp.tool()
 def git_clone(repo_url: str, local_path: str) -> str:
-    """Clone một repository về thư mục local. Tự động chèn Token để Auth nếu cần."""
+    """Clone repo từ URL. Tự động xử lý Auth qua Token."""
+    logging.info(f"Đang Clone {repo_url} về {local_path}")
     try:
         url = repo_url
         if GITHUB_TOKEN and "github.com" in url and "@" not in url:
             url = url.replace("https://", f"https://{GITHUB_TOKEN}@")
+            logging.debug("Đã nhúng Token vào URL để xác thực.")
             
         Repo.clone_from(url, local_path)
         subprocess.run(["git", "config", "--global", "--add", "safe.directory", local_path])
-        return f"Đã clone thành công về {local_path}"
+        return f"Clone thành công về {local_path}"
     except Exception as e:
-        return f"Lỗi clone: {str(e)}"
+        logging.error(f"Lỗi Clone: {str(e)}")
+        return f"Lỗi: {str(e)}"
 
 @mcp.tool()
-def git_sync(repo_path: str, action: str, remote: str = "origin", branch: str = "main") -> str:
-    """Thực hiện pull hoặc push code. action: 'pull' hoặc 'push'."""
+def git_sync(repo_path: str, action: str, remote: str = "origin") -> str:
+    """Đồng bộ code: 'pull' (kéo) hoặc 'push' (đẩy)."""
+    logging.info(f"Thực hiện {action} tại {repo_path}")
     try:
         repo = Repo(repo_path)
         origin = repo.remote(name=remote)
         if action == "pull":
             origin.pull()
-            return "Đã kéo code mới nhất về."
-        elif action == "push":
+        else:
             origin.push()
-            return "Đã đẩy code lên remote thành công."
-    except Exception as e: return f"Lỗi sync: {str(e)}"
-
-@mcp.tool()
-def git_merge_local(repo_path: str, source_branch: str, target_branch: str) -> str:
-    """Merge nhánh source vào nhánh target ở máy local."""
-    try:
-        repo = Repo(repo_path)
-        repo.git.checkout(target_branch)
-        result = repo.git.merge(source_branch)
-        return f"Kết quả merge: {result}"
-    except Exception as e: return f"Lỗi merge: {str(e)}"
-
-# --- NHÓM 3: THAO TÁC CLOUD (PyGithub) ---
+        logging.debug(f"Hoàn tất {action} thành công.")
+        return f"Đã {action} thành công."
+    except Exception as e:
+        logging.error(f"Lỗi Sync ({action}): {str(e)}")
+        return f"Lỗi: {str(e)}"
 
 @mcp.tool()
 def create_remote_repo(name: str, description: str = "", private: bool = True) -> str:
-    """Tạo một repository mới trực tiếp trên tài khoản GitHub Cloud của bạn."""
-    if not gh_client: return "Chưa cấu hình GITHUB_TOKEN"
+    """Tạo Repository mới trên GitHub Cloud."""
+    logging.info(f"Yêu cầu tạo Repo Cloud: {name}")
+    if not gh_client: return "Lỗi: Không có GITHUB_TOKEN"
     try:
         user = gh_client.get_user()
         repo = user.create_repo(name=name, description=description, private=private)
-        return f"Đã tạo Repo Cloud thành công: {repo.html_url}"
+        logging.info(f"Repo Cloud đã tạo: {repo.html_url}")
+        return f"Đã tạo Repo: {repo.html_url}"
     except Exception as e:
-        return f"Lỗi tạo Repo Cloud: {str(e)}"
+        logging.error(f"Lỗi tạo Repo Cloud: {str(e)}")
+        return f"Lỗi: {str(e)}"
+
+# --- NHÓM 4: CẤU HÌNH & LỆNH NÂNG CAO ---
 
 @mcp.tool()
-def create_github_pull_request(repo_name: str, title: str, body: str, head: str, base: str = "main") -> str:
-    """Tạo một Pull Request (Merge Request) trên GitHub Cloud."""
-    if not gh_client: return "Chưa cấu hình GITHUB_TOKEN"
-    try:
-        repo = gh_client.get_repo(repo_name)
-        pr = repo.create_pull(title=title, body=body, head=head, base=base)
-        return f"Đã tạo PR thành công: {pr.html_url}"
-    except Exception as e: return f"Lỗi tạo PR: {str(e)}"
-
-# --- NHÓM 4: QUẢN LÝ FILE, TRACKING & IGNORE ---
-
-@mcp.tool()
-def fix_git_tracking(repo_path: str, file_path: str) -> str:
-    """Xóa một file khỏi tracking (git rm --cached) nhưng giữ lại file vật lý."""
+def git_config_identity(repo_path: str, name: str, email: str) -> str:
+    """Thiết lập user.name và user.email cho các commit."""
+    logging.info(f"Cấu hình danh tính: {name} <{email}>")
     try:
         repo = Repo(repo_path)
-        repo.git.rm('--cached', file_path)
-        return f"Đã ngừng theo dõi {file_path}. Đừng quên thêm nó vào .gitignore!"
-    except Exception as e: return f"Lỗi: {str(e)}"
+        with repo.config_writer() as cw:
+            cw.set_value("user", "name", name)
+            cw.set_value("user", "email", email)
+        return "Cấu hình danh tính thành công."
+    except Exception as e:
+        logging.error(f"Lỗi cấu hình danh tính: {str(e)}")
+        return f"Lỗi: {str(e)}"
 
 @mcp.tool()
-def get_file_diff(repo_path: str, file_path: str) -> str:
-    """Xem các thay đổi chưa commit của một file (git diff)."""
+def git_raw_command(repo_path: str, command: list[str]) -> str:
+    """Thực thi lệnh Git thô (Raw) cho các trường hợp đặc biệt."""
+    logging.info(f"Thực thi lệnh Raw: git {' '.join(command)}")
     try:
         repo = Repo(repo_path)
-        return repo.git.diff(file_path)
-    except Exception as e: return f"Lỗi lấy diff: {str(e)}"
+        result = repo.git.execute(["git"] + command)
+        logging.debug(f"Kết quả lệnh Raw: {result}")
+        return result
+    except Exception as e:
+        logging.error(f"Lỗi thực thi lệnh Raw: {str(e)}")
+        return f"Lỗi: {str(e)}"
 
 @mcp.tool()
 def manage_gitignore(repo_path: str, action: str, pattern: str = "") -> str:
-    """Đọc hoặc thêm pattern vào file .gitignore."""
+    """Quản lý tệp .gitignore (đọc/thêm)."""
+    logging.debug(f"Manage .gitignore: {action} tại {repo_path}")
     path = os.path.join(repo_path, ".gitignore")
     try:
         if action == "read":
-            if os.path.exists(path):
-                with open(path, 'r') as f: return f.read()
-            return ".gitignore chưa tồn tại."
+            if not os.path.exists(path): return ".gitignore không tồn tại."
+            with open(path, 'r') as f: return f.read()
         elif action == "add":
             with open(path, 'a') as f:
                 f.write(f"\n{pattern}")
-            return f"Đã thêm '{pattern}' vào .gitignore"
-    except Exception as e: return f"Lỗi: {str(e)}"
-
-@mcp.tool()
-def git_add(repo_path: str, file_paths: list[str]) -> str:
-    """
-    Thêm các file vào staging area (git add).
-    file_paths: Danh sách các đường dẫn file cần add.
-    """
-    try:
-        repo = Repo(repo_path)
-        # Thực hiện add danh sách file
-        repo.index.add(file_paths)
-        return f"Đã thực hiện git add cho: {', '.join(file_paths)}"
+            logging.info(f"Đã thêm '{pattern}' vào .gitignore")
+            return f"Đã thêm {pattern}"
     except Exception as e:
-        logging.error(f"LỖI GIT ADD: {str(e)}")
-        return f"Lỗi thực hiện git add: {str(e)}"
+        logging.error(f"Lỗi manage .gitignore: {str(e)}")
+        return f"Lỗi: {str(e)}"
 
-@mcp.tool()
-def git_commit(repo_path: str, message: str) -> str:
-    """
-    Tạo một commit mới với nội dung tin nhắn chỉ định (git commit -m).
-    """
-    try:
-        repo = Repo(repo_path)
-        # Thực hiện commit các file đã được add vào index
-        new_commit = repo.index.commit(message)
-        return f"Đã commit thành công với mã: {new_commit.hexsha}\nNội dung: {message}"
-    except Exception as e:
-        logging.error(f"LỖI GIT COMMIT: {str(e)}")
-        return f"Lỗi thực hiện git commit: {str(e)}"
-
+# --- KHỞI CHẠY SERVER ---
 if __name__ == "__main__":
-    logging.info("--- SERVER GIT EXPERT KHỞI ĐỘNG (PORT 8002) ---")
-    mcp.run(transport="sse")
+    logging.info("--- SERVER GIT EXPERT ĐANG KHỞI CHẠY TRÊN PORT 8002 ---")
+    try:
+        mcp.run(transport="sse")
+    except Exception as e:
+        logging.critical(f"SERVER CRASHED: {str(e)}")
